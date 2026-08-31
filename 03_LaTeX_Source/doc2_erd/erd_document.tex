@@ -1,0 +1,79 @@
+% !TeX program = xelatex
+\documentclass[11pt]{article}
+\input{../mal-preamble.tex}
+
+\begin{document}
+\renewcommand{\DocFooterTag}{Deliverable 2 of 3}
+
+\malTitlePage
+  {Mal \textbullet\ Data Platform \textbullet\ Deliverable 2 of 3}
+  {Customer 360 \& CAR: Entity-Relationship Diagram}
+  {The complete field-level schema for the golden Customer 360 and the CAR snapshot, drawn as one connected model, with an entity dictionary and a cardinality walkthrough for engineers who need to build against it directly.}
+  {DELIVERABLE 2 OF 3 --- ERD}
+  {\begin{tabular}{|L{3.6cm}|L{4.6cm}|L{2.3cm}|L{3.7cm}|}
+    \hline
+    \tblheadrow \hcell{Companion Documents} & \hcell{Notation} & \hcell{Status} & \hcell{Targets} \\
+    \hline
+    \#1 Architecture \quad \#3 Identity SQL & Crow's foot (Mermaid \texttt{erDiagram}) & Draft for review & 500K customers, Year 1 \\
+    \hline
+  \end{tabular}}
+
+\section*{How to Read This Diagram}
+\addcontentsline{toc}{section}{How to Read This Diagram}
+This diagram uses standard crow's-foot notation. A single bar means \emph{exactly one}; a circle means \emph{zero, optionally}; a crow's foot (three prongs) means \emph{many}. Reading the notation at the end nearest an entity tells you the cardinality \emph{from the other entity's point of view} -- so \texttt{CUSTOMER\_GOLDEN\ ||--o\{\ ACCOUNT} reads as "one customer owns zero or many accounts."
+
+Solid connecting lines are enforced foreign keys inside the golden layer. \texttt{CAR\_SNAPSHOT} is drawn as a satellite of Customer rather than a peer of the other entities because it is a derived, denormalized artifact rebuilt nightly from everything else in this diagram -- nothing else holds a live foreign key into it, and it holds none into anything but Customer.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{erd.pdf}
+\caption{Golden Customer 360 core plus the CAR snapshot. Rendered from Mermaid \texttt{erDiagram} source; entity and column names match the SQL in Deliverable 3 exactly.}
+\end{figure}
+
+\clearpage
+\section{Entity Dictionary}
+Each entity below is described by what one row actually represents (its grain), its role in the schema (dimension, fact, bridge, or derived), and the fields worth calling out specifically.
+
+\subsection{CUSTOMER\_GOLDEN --- The Golden Identity Dimension}
+\textbf{Grain:} one row per Enterprise Customer ID (ECID) per version. \textbf{Role:} SCD Type 2 dimension -- the single source of truth for who a customer is. \texttt{ecid} is generated once, at first resolution, and never changes; \texttt{scd\_valid\_from} / \texttt{scd\_valid\_to} / \texttt{scd\_is\_current} track history so that "what did we know about this customer on this date" is always answerable, which matters for audit and for avoiding label leakage in model training. \texttt{national\_id\_token}, \texttt{mobile\_e164\_token}, and \texttt{email\_token} are tokenized, never raw, values -- see Deliverable 1, Section 4. \texttt{marketing\_opt\_in} is the one field on this table that core banking has no equivalent for and never overwrites -- per the survivorship rules in Deliverable 1, Section 2.3, it always survives from CRM.
+
+\subsection{IDENTITY\_CROSSWALK --- The Merge Ledger}
+\textbf{Grain:} one row per (source system, source customer ID) pair. \textbf{Role:} bridge table, and the actual mechanism behind every merge and split. This table, not \texttt{CUSTOMER\_GOLDEN}, is what identity resolution writes to -- an ECID's membership is defined by which crosswalk rows point to it, which is what makes an incorrect merge reversible: correcting it is a crosswalk update and an SCD2 replay, not a destructive rewrite of the golden record itself.
+
+\subsection{ACCOUNT --- The Banking Relationship}
+\textbf{Grain:} one row per account (current, savings, financing). \textbf{Role:} dimension, owned by exactly one \texttt{ecid} for Q2 (joint accounts are a Year 2 extension, modeled as an additional bridge rather than a change to this table). References \texttt{PRODUCT} rather than repeating product attributes on every account row.
+
+\subsection{PRODUCT --- The Catalog}
+\textbf{Grain:} one row per product definition. \textbf{Role:} dimension. Carries \texttt{shariah\_contract\_type} (Murabaha, Mudarabah, Wakala, and so on) instead of an interest rate -- the one place this schema visibly departs from a conventional-bank Customer 360 template, because the underlying contract structure is what both Product and Compliance actually need to reason about.
+
+\subsection{TRANSACTION --- The Posted Ledger}
+\textbf{Grain:} one row per posted transaction. \textbf{Role:} fact table, additive, referencing \texttt{ACCOUNT}. Kept at transaction grain in the 360 for Support and Product to answer "what happened"; heavier aggregation for scoring happens downstream in \texttt{CAR\_SNAPSHOT}, not here.
+
+\subsection{CONSENT --- The Single Gate}
+\textbf{Grain:} one row per (\texttt{ecid}, consent type, version). \textbf{Role:} dimension-like control table. Every masking and personalization decision in the platform reads from this table; nothing downstream is allowed to maintain its own separate notion of whether a customer has agreed to something.
+
+\subsection{SUPPORT\_TICKET --- CRM Case History}
+\textbf{Grain:} one row per case. \textbf{Role:} fact table, linked to \texttt{ecid} once the originating CRM contact resolves through the crosswalk.
+
+\subsection{DEVICE\_IDENTITY --- The Authenticated Link to a Device}
+\textbf{Grain:} one row per Amplitude device ID. \textbf{Role:} dimension, linked to \texttt{ecid} \emph{only} once an authenticated session confirms the device belongs to that customer -- never speculatively, never by behavioral inference alone.
+
+\subsection{BEHAVIORAL\_EVENT --- Raw Amplitude Events}
+\textbf{Grain:} one row per event. \textbf{Role:} fact table, referencing \texttt{DEVICE\_IDENTITY} rather than \texttt{ecid} directly, which is what makes the authenticated-binding rule in \texttt{DEVICE\_IDENTITY} the single enforcement point for the whole behavioral stream.
+
+\subsection{CAR\_SNAPSHOT --- The Derived Analytic Record}
+\textbf{Grain:} one row per (\texttt{ecid}, \texttt{snapshot\_date}). \textbf{Role:} derived, deliberately denormalized -- rebuilt nightly from every other entity in this diagram, never updated in place. It is intentionally the widest, flattest entity in the model; see Deliverable 1, Section 5 for why that width is the point rather than an oversight. \texttt{risk\_rating} and \texttt{residency\_country} are carried over unchanged from \texttt{CUSTOMER\_GOLDEN} rather than recomputed, and \texttt{feature\_freshness\_hours} records how stale the snapshot's inputs were at build time -- both exist so a model consuming this row never has to guess.
+
+\section{Cardinality Walkthrough}
+\begin{itemize}
+\item \textbf{Customer \(\rightarrow\) Identity crosswalk (one to many):} one ECID can have many source-system linkages, one per system it appears in. This is the relationship merges and splits actually operate on.
+\item \textbf{Customer \(\rightarrow\) CAR snapshot (one to at most one, per day):} zero or one row per ECID per \texttt{snapshot\_date} -- drawn as one-to-one because the "many" dimension here is time, not a second live relationship.
+\item \textbf{Account \(\rightarrow\) Product (many to one):} many accounts can be instances of the same product; the Sharia contract type lives once, on \texttt{PRODUCT}, never repeated per account.
+\item \textbf{Device identity \(\rightarrow\) Behavioral event (one to many):} raw Amplitude events, aggregated nightly into the CAR's engagement columns today, and consumed directly by the streaming layer once that exists.
+\end{itemize}
+
+\begin{rationale}
+Every foreign key in this diagram points toward \texttt{ecid}, directly or through one hop, and never the reverse. That is a deliberate constraint, not a coincidence of how the boxes happened to get drawn: it keeps identity resolution upstream of everything else in the platform, so a change to how two records get matched only ever has to propagate forward through this diagram, never backward.
+\end{rationale}
+
+\end{document}

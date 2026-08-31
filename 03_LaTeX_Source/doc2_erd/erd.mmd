@@ -1,0 +1,106 @@
+erDiagram
+    CUSTOMER_GOLDEN ||--o{ IDENTITY_CROSSWALK : "resolves from"
+    CUSTOMER_GOLDEN ||--o{ ACCOUNT : "owns"
+    CUSTOMER_GOLDEN ||--o{ CONSENT : "grants"
+    CUSTOMER_GOLDEN ||--o{ SUPPORT_TICKET : "raises"
+    CUSTOMER_GOLDEN ||--o{ DEVICE_IDENTITY : "authenticates from"
+    CUSTOMER_GOLDEN ||--o| CAR_SNAPSHOT : "summarized daily in"
+    ACCOUNT ||--o{ TRANSACTION : "posts"
+    ACCOUNT }o--|| PRODUCT : "instance of"
+    DEVICE_IDENTITY ||--o{ BEHAVIORAL_EVENT : "emits"
+
+    CUSTOMER_GOLDEN {
+        varchar ecid PK
+        varchar legal_name
+        date date_of_birth
+        varchar national_id_token
+        varchar mobile_e164_token
+        varchar email_token
+        boolean marketing_opt_in
+        varchar kyc_status
+        varchar risk_rating
+        varchar residency_country
+        timestamp scd_valid_from
+        timestamp scd_valid_to
+        boolean scd_is_current
+    }
+    IDENTITY_CROSSWALK {
+        varchar ecid FK
+        varchar source_system PK
+        varchar source_customer_id PK
+        float match_confidence
+        varchar match_method
+        timestamp linked_at
+    }
+    ACCOUNT {
+        varchar account_id PK
+        varchar ecid FK
+        varchar product_id FK
+        varchar account_status
+        date opened_date
+        decimal current_balance
+        varchar currency
+    }
+    PRODUCT {
+        varchar product_id PK
+        varchar product_name
+        varchar shariah_contract_type
+        varchar product_category
+    }
+    TRANSACTION {
+        varchar txn_id PK
+        varchar account_id FK
+        timestamp txn_timestamp
+        decimal amount
+        varchar txn_type
+        varchar channel
+        varchar counterparty_country
+    }
+    CONSENT {
+        varchar consent_id PK
+        varchar ecid FK
+        varchar consent_type
+        varchar status
+        timestamp granted_at
+        timestamp withdrawn_at
+        varchar consent_version
+    }
+    SUPPORT_TICKET {
+        varchar ticket_id PK
+        varchar ecid FK
+        varchar channel
+        varchar category
+        varchar status
+        timestamp opened_at
+    }
+    DEVICE_IDENTITY {
+        varchar device_id PK
+        varchar ecid FK
+        varchar platform
+        timestamp first_seen
+        timestamp last_seen
+    }
+    BEHAVIORAL_EVENT {
+        varchar event_id PK
+        varchar device_id FK
+        varchar event_name
+        timestamp event_timestamp
+        json event_props
+    }
+    CAR_SNAPSHOT {
+        varchar ecid PK
+        date snapshot_date PK
+        varchar kyc_status
+        varchar risk_rating
+        varchar residency_country
+        decimal total_balance
+        decimal avg_monthly_inflow
+        decimal utilization_ratio
+        int txn_count_30d
+        boolean cross_border_txn_flag
+        int session_count_7d
+        varchar dominant_channel
+        varchar consent_personalization
+        int schema_version
+        int feature_freshness_hours
+    }
